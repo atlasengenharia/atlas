@@ -157,7 +157,7 @@
         // --- FUNÇÕES DE API (Com Suporte a Proxy) ---
         
         async function apiCall(method, params) {
-            const url = `${config.baseUrl}?method=${method}&username=${encodeURIComponent(config.username)}&password=${encodeURIComponent(config.password)}`;
+            let url = `${config.baseUrl}?method=${method}&username=${encodeURIComponent(config.username)}&password=${encodeURIComponent(config.password)}`;
             
             if (params && Object.keys(params).length > 0) {
                 let queryString = url.split('?')[1];
@@ -194,11 +194,11 @@
             const btn = document.querySelector('#loginScreen button');
             btn.innerHTML = '<i class="ph ph-spinner animate-spin"></i> Verificando...';
 
-            apiCall('GetCategories', {}).then(data => {
-                config.baseUrl = urlInput + '/player/api.json';
-                config.username = user;
-                config.password = pass;
+            config.baseUrl = urlInput + '/player/api.json';
+            config.username = user;
+            config.password = pass;
 
+            apiCall('GetCategories', {}).then(data => {
                 document.getElementById('loginScreen').classList.add('hidden');
                 document.getElementById('appScreen').classList.remove('hidden');
                 
@@ -360,16 +360,17 @@
 
         function playStream(url) {
             const container = document.getElementById('playerContainer');
+            const videoType = url.indexOf('.m3u8') !== -1 ? 'application/x-mpegURL' : 'video/mp4';
             
             if (container.style.opacity === '1') {
-                player.src({ type: url.split('?')[0], src: url });
+                player.src({ type: videoType, src: url });
                 player.play();
             } else {
                 container.classList.remove('pointer-events-none');
                 container.classList.add('opacity-100', 'z-50'); 
                 
                 setTimeout(() => {
-                    player.src({ type: url.split('?')[0], src: url });
+                    player.src({ type: videoType, src: url });
                     player.play();
                 }, 100);
             }
