@@ -43,8 +43,10 @@
             <div class="space-y-4">
                 <div>
                     <label class="block text-sm font-medium mb-1 text-gray-400">URL do Servidor</label>
-                    <input type="text" id="serverUrl" placeholder="http://ip:porta/player/api.json" 
+                    <!-- Adicionado placeholder mais claro -->
+                    <input type="text" id="serverUrl" placeholder="http://ip:porta/player/api.json (ou apenas http://ip:porta)" 
                            class="w-full bg-gray-700 border border-gray-600 rounded p-3 focus:outline-none focus:border-blue-500 text-white">
+                    <p class="text-xs text-gray-400 mt-1">Dica: Se o erro persistir, tente remover "/player/api.json" da URL.</p>
                 </div>
                 
                 <div class="grid grid-cols-2 gap-4">
@@ -147,7 +149,7 @@
             password: ''
         };
 
-        let currentCategory = null; // Para saber de onde viemos (ex: categoria de filmes)
+        let currentCategory = null; 
         
         // Inicialização do Player Video.js
         var player = videojs('my-video', {
@@ -157,26 +159,60 @@
             poster: ''
         });
 
-        // --- FUNÇÕES DE API ---
+        // --- FUNÇÕES DE API MELHORADAS ---
         
         async function apiCall(method, params) {
-            const url = `${config.baseUrl}?method=${method}&username=${encodeURIComponent(config.username)}&password=${encodeURIComponent(config.password)}`;
+            const baseUrl = config.baseUrl;
             
-            if (params && Object.keys(params).length > 0) {
-                // Adiciona outros parâmetros se houver (ex: category_id)
-                let queryString = url.split('?')[1];
-                for(let key in params) {
-                    queryString += `&${key}=${encodeURIComponent(params[key])}`;
+            if (!baseUrl) throw new Error("Base URL não configurada.");
+
+            // Monta a URL base com o método
+            let url = `${baseUrl}?method=${encodeURIComponent(method)}`;
+            
+            // Adiciona parâmetros (username, password e outros específicos da chamada)
+            const paramsToAppend = { ...params, username: config.username, password: config.password };
+            
+            for(let key in paramsToAppend) {
+                if(paramsToAppend[key] !== undefined) {
+                    url += `&${key}=${encodeURIComponent(paramsToAppend[key])}`;
                 }
-                url = `${config.baseUrl}?${queryString}`;
             }
 
             try {
-                const response = await fetch(url);
-                if (!response.ok) throw new Error('Erro de rede');
-                return await response.json();
+                const response = await fetch(url, {
+                    method: 'GET',
+                    headers: {
+                        // Adiciona User-Agent para evitar que alguns servidores retornem HTML genérico
+                        'User-Agent': 'Xtream Web Player/1.0 (Mozilla/5.0)' 
+                    }
+                });
+
+                const contentType = response.headers.get('content-type');
+                
+                // Verifica se a resposta é JSON antes de parsear
+                if (!contentType || !contentType.includes('application/json')) {
+                    const text = await response.text();
+                    console.warn(`API Call (${method}) returned non-JSON: ${response.status} - ${text.substring(0, 100)}`);
+                    
+                    // Se for HTML (ex: erro de login ou redirect), lança erro específico
+                    if (text.includes('<!DOCTYPE') || text.includes('<html')) {
+                        throw new Error(`Server returned HTML instead of JSON. Check URL path or Auth.`);
+                    }
+                    throw new Error(`Unexpected Content-Type: ${contentType}`);
+                }
+
+                const data = await response.json();
+                
+                // Verifica se a API retornou sucesso (alguns servidores usam 'result' ou 'status')
+                if (data.result === false || data.status === 'error' || !data.data) {
+                    throw new Error(`API Response: ${JSON.stringify(data)}`);
+                }
+
+                return data;
+
             } catch (error) {
                 console.error(error);
+                // Re-lança o erro para ser tratado no UI
                 throw error;
             }
         }
@@ -184,7 +220,7 @@
         // --- LÓGICA DE LOGIN ---
 
         function attemptLogin() {
-            const urlInput = document.getElementById('serverUrl').value.trim().replace(/\/player\/api\.json$/, ''); // Remove /player/api.json se o usuário esqueceu, mas mantém a estrutura
+            const urlInput = document.getElementById('serverUrl').value.trim();
             const user = document.getElementById('username').value;
             const pass = document.getElementById('password').value;
 
@@ -193,33 +229,40 @@
                 return;
             }
 
-            // Teste de conexão simples (GetCategories é um bom teste inicial para VOD, GetChannels para TV)
-            // Vamos tentar pegar categorias primeiro para ver se o servidor responde.
+            // Normaliza a URL (remove barras duplas e barra final desnecessária)
+            let cleanUrl = urlInput.replace(/\/+$/, '').replace(/^https?:\/\/[^/]+\/+/, '');
             
+            // Tenta detectar se o usuário já incluiu /player/api.json ou não
+            if (!cleanUrl.includes('/player/api.json')) {
+                cleanUrl += '/player/api.json';
+            }
+
             document.getElementById('loginError').classList.add('hidden');
             const btn = document.querySelector('#loginScreen button');
             btn.innerHTML = '<i class="ph ph-spinner animate-spin"></i> Verificando...';
 
-            apiCall('GetCategories', {}).then(data => {
-                // Se GetCategories funcionar, o login é válido.
-                config.baseUrl = urlInput + '/player/api.json';
-                config.username = user;
-                config.password = pass;
+            // Pequeno delay para garantir que o DNS/Connection esteja pronto
+            setTimeout(() => {
+                apiCall('GetCategories', {}).then(data => {
+                    config.baseUrl = cleanUrl;
+                    config.username = user;
+                    config.password = pass;
 
-                document.getElementById('loginScreen').classList.add('hidden');
-                document.getElementById('appScreen').classList.remove('hidden');
-                
-                // Carregar canais e categorias iniciais
-                loadChannels();
-                loadVodCategories(); 
-            }).catch(err => {
-                showError("Erro ao conectar: " + err.message);
-                btn.innerHTML = '<i class="ph ph-sign-in"></i> Conectar';
-            });
+                    document.getElementById('loginScreen').classList.add('hidden');
+                    document.getElementById('appScreen').classList.remove('hidden');
+                    
+                    // Carregar canais e categorias iniciais
+                    loadChannels();
+                    loadVodCategories(); 
+                }).catch(err => {
+                    showError("Erro ao conectar: " + err.message);
+                    btn.innerHTML = '<i class="ph ph-sign-in"></i> Conectar';
+                });
+            }, 500);
         }
 
         function logout() {
-            location.reload(); // Recarrega a página para voltar ao login
+            location.reload(); 
         }
 
         function showError(msg) {
@@ -237,15 +280,14 @@
                 const data = await apiCall('GetChannels', {});
                 
                 document.getElementById('pageTitle').innerText = "Canais de TV";
-                renderGrid(data.channels, 'channel'); // Renderiza a lista
+                renderGrid(data.channels, 'channel'); 
                 
-                // Se não houver canais
                 if(!data.channels || data.channels.length === 0) {
                     showStatus("Nenhum canal encontrado.", false);
                 }
 
             } catch (e) {
-                showError("Falha ao carregar canais.");
+                showError("Falha ao carregar canais: " + e.message);
             } finally {
                 hideStatus();
             }
@@ -260,7 +302,7 @@
                 const data = await apiCall('GetCategories', {});
                 
                 const container = document.getElementById('vod-categories');
-                container.innerHTML = ''; // Limpa
+                container.innerHTML = ''; 
 
                 if (data.categories && data.categories.length > 0) {
                     data.categories.forEach(cat => {
@@ -270,7 +312,6 @@
                             <i class="ph ph-folder-open text-xl"></i>
                             <span class="font-medium truncate">${cat.name}</span>
                         `;
-                        // Ao clicar, carrega os filmes da categoria específica
                         btn.onclick = () => loadMoviesFromCategory(cat.id); 
                         
                         container.appendChild(btn);
@@ -283,14 +324,14 @@
                 }
 
             } catch (e) {
-                showError("Falha ao carregar categorias.");
+                showError("Falha ao carregar categorias: " + e.message);
             } finally {
                 hideStatus();
             }
         }
 
         async function loadMoviesFromCategory(catId) {
-            currentCategory = catId; // Salva a categoria atual para voltar se necessário
+            currentCategory = catId; 
             
             showStatus("Carregando Filmes...", true);
             
@@ -301,25 +342,23 @@
                 renderGrid(data.movies, 'movie');
 
             } catch (e) {
-                showError("Falha ao carregar filmes.");
+                showError("Falha ao carregar filmes: " + e.message);
             } finally {
                 hideStatus();
             }
         }
 
         async function loadSeries() {
-             // Simplificação: Carrega todas as séries ou uma categoria específica? 
-             // Geralmente GetCategories retorna 'series' e 'movies'. Vamos assumir que o usuário quer ver a lista geral.
              showStatus("Carregando Séries...", true);
              
              try {
-                const data = await apiCall('GetSeries', {}); // Método direto para séries
+                const data = await apiCall('GetSeries', {}); 
                 
                 document.getElementById('pageTitle').innerText = "Séries";
                 renderGrid(data.series, 'series');
 
             } catch (e) {
-                showError("Falha ao carregar séries.");
+                showError("Falha ao carregar séries: " + e.message);
             } finally {
                 hideStatus();
             }
@@ -342,7 +381,6 @@
             for (let i = 0; i < limit; i++) {
                 const item = items[i];
                 
-                // Construção do Card HTML
                 let iconClass = 'ph-play-circle';
                 if(type === 'channel') iconClass = 'ph-tv';
                 else if(type === 'movie') iconClass = 'ph-film-strip';
@@ -351,7 +389,6 @@
                 const card = document.createElement('div');
                 card.className = "bg-gray-800 rounded-lg overflow-hidden border border-gray-700 card-hover flex flex-col";
                 
-                // Imagem (Logo ou Poster)
                 let imgSrc = item.logo || 'https://via.placeholder.com/300x169?text=Sem+Imagem';
                 if(type === 'movie' && item.poster) imgSrc = item.poster;
 
@@ -368,7 +405,6 @@
                     </div>
                 `;
 
-                // Evento de Clique para Reproduzir
                 card.onclick = () => {
                     playStream(item.stream_url);
                 };
@@ -380,23 +416,19 @@
         function playStream(url) {
             const container = document.getElementById('playerContainer');
             
-            // Se o player já estiver visível, apenas atualiza a fonte. 
-            // Se não, mostra o container.
             if (container.style.opacity === '1') {
                 player.src({ type: url.split('?')[0], src: url });
                 player.play();
             } else {
                 container.classList.remove('pointer-events-none');
-                container.classList.add('opacity-100', 'z-50'); // Traz para frente
+                container.classList.add('opacity-100', 'z-50'); 
                 
-                // Pequeno delay para garantir que o DOM do container esteja pronto antes de injetar a fonte
                 setTimeout(() => {
                     player.src({ type: url.split('?')[0], src: url });
                     player.play();
                 }, 100);
             }
 
-            // Scroll suave até o player
             document.getElementById('playerContainer').scrollIntoView({ behavior: 'smooth' });
         }
 
@@ -405,7 +437,6 @@
             container.classList.remove('opacity-100', 'z-50');
             container.classList.add('pointer-events-none', 'opacity-0');
             
-            // Pausa o player visualmente, mas mantém a fonte carregada para reiniciar rápido se necessário
             player.pause(); 
         }
 
@@ -431,7 +462,6 @@
 
         // Helper simples para nome da categoria (opcional, depende do retorno da API)
         function getCategoryName(id) {
-             // Tenta buscar o nome baseado no ID se necessário, ou retorna um placeholder
              return id; 
         }
 
