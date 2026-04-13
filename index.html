@@ -1,0 +1,414 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Xtream Web Player - Fixado</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Video.js (Player HLS/MP4) -->
+    <link href="https://vjs.zencdn.net/7.20.3/video-js.css" rel="stylesheet" />
+    <script src="https://vjs.zencdn.net/7.20.3/video.min.js"></script>
+
+    <!-- Ícones -->
+    <script src="https://unpkg.com/@phosphor-icons/web"></script>
+
+    <style>
+        body { background-color: #0f172a; color: white; }
+        .video-js { width: 100%; height: auto; aspect-ratio: 16/9; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.5); }
+        .card-hover:hover { transform: scale(1.02); transition: all 0.2s ease; cursor: pointer; border-color: #3b82f6; }
+        /* Loading Spinner */
+        .loader { border-top-color: #3b82f6; -webkit-animation: spinner 1.5s linear infinite; animation: spinner 1.5s linear infinite; }
+        @keyframes spinner { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+
+        /* Video.js Customization */
+        .video-js--vjs-big-play-button { color: white; left: 20px !important; top: 20px !important; font-size: 4rem !important; background-color: rgba(59, 130, 246, 0.8) !important; border-radius: 50% !important; }
+    </style>
+</head>
+<body class="h-screen flex overflow-hidden">
+
+    <!-- TELA DE LOGIN -->
+    <div id="loginScreen" class="absolute inset-0 z-50 bg-gray-900 flex items-center justify-center p-4">
+        <div class="bg-gray-800 p-8 rounded-xl shadow-2xl w-full max-w-md border border-gray-700">
+            <h1 class="text-3xl font-bold mb-6 text-blue-500 flex items-center gap-2">
+                <i class="ph ph-play-circle"></i> Xtream Web Player
+            </h1>
+            
+            <div class="space-y-4">
+                <div>
+                    <label class="block text-sm font-medium mb-1 text-gray-400">URL do Servidor</label>
+                    <!-- Adicione /player/api.json se não tiver -->
+                    <input type="text" id="serverUrl" placeholder="http://ip:porta/player/api.json" 
+                           class="w-full bg-gray-700 border border-gray-600 rounded p-3 focus:outline-none focus:border-blue-500 text-white">
+                </div>
+                
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-sm font-medium mb-1 text-gray-400">Usuário</label>
+                        <input type="text" id="username" placeholder="user" 
+                               class="w-full bg-gray-700 border border-gray-600 rounded p-3 focus:outline-none focus:border-blue-500 text-white">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium mb-1 text-gray-400">Senha</label>
+                        <input type="password" id="password" placeholder="pass" 
+                               class="w-full bg-gray-700 border border-gray-600 rounded p-3 focus:outline-none focus:border-blue-500 text-white">
+                    </div>
+                </div>
+
+                <button onclick="attemptLogin()" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded transition duration-200 mt-4 flex items-center justify-center gap-2">
+                    <i class="ph ph-sign-in"></i> Conectar
+                </button>
+            </div>
+
+            <p id="loginError" class="text-red-500 text-sm mt-3 hidden text-center font-semibold"></p>
+        </div>
+    </div>
+
+    <!-- APLICAÇÃO PRINCIPAL -->
+    <div id="appScreen" class="flex w-full h-full hidden">
+        
+        <!-- SIDEBAR -->
+        <aside class="w-64 bg-gray-800 border-r border-gray-700 flex-shrink-0 flex flex-col">
+            <div class="p-5 border-b border-gray-700">
+                <h2 class="text-xl font-bold text-white">Menu</h2>
+            </div>
+            
+            <nav class="flex-1 p-4 space-y-2 overflow-y-auto">
+                <button onclick="loadChannels()" id="btn-channels" class="w-full flex items-center gap-3 px-4 py-3 bg-gray-700 hover:bg-blue-600 rounded-lg text-left transition duration-200 group">
+                    <i class="ph ph-tv text-xl"></i>
+                    <span class="font-medium">Canais (TV)</span>
+                </button>
+
+                <div class="pt-4 pb-2 px-4 text-xs font-semibold text-gray-500 uppercase tracking-wider">Filmes & Séries</div>
+                
+                <!-- Lista de Categorias VOD -->
+                <div id="vod-categories" class="space-y-1"></div>
+
+                <button onclick="loadMovies()" id="btn-movies-all" class="w-full flex items-center gap-3 px-4 py-3 bg-gray-700 hover:bg-blue-600 rounded-lg text-left transition duration-200 group mt-2">
+                    <i class="ph ph-film-strip text-xl"></i>
+                    <span class="font-medium">Todos os Filmes</span>
+                </button>
+
+                <button onclick="loadSeries()" id="btn-series-all" class="w-full flex items-center gap-3 px-4 py-3 bg-gray-700 hover:bg-blue-600 rounded-lg text-left transition duration-200 group">
+                    <i class="ph ph-film-strip text-xl"></i>
+                    <span class="font-medium">Todas as Séries</span>
+                </button>
+            </nav>
+
+            <div class="p-4 border-t border-gray-700 bg-gray-800/50">
+                <button onclick="logout()" class="w-full text-sm text-red-400 hover:text-red-300 flex items-center justify-center gap-2 py-2 rounded hover:bg-gray-700 transition">
+                    <i class="ph ph-sign-out"></i> Desconectar
+                </button>
+            </div>
+        </aside>
+
+        <!-- CONTEÚDO PRINCIPAL -->
+        <main class="flex-1 flex flex-col h-full bg-gray-900 relative">
+            
+            <!-- PLAYER DE VÍDEO (Overlay) -->
+            <div id="playerContainer" class="absolute inset-0 z-40 pointer-events-none opacity-0 transition-opacity duration-300">
+                <div class="video-js vjs-big-play-centered" data-setup='{"fluid": true, "autoplay": true}' id="my-video"></div>
+            </div>
+
+            <!-- ÁREA DE LISTAGEM -->
+            <div id="contentArea" class="flex-1 overflow-y-auto p-6">
+                <header class="mb-6 flex justify-between items-center">
+                    <h2 id="pageTitle" class="text-3xl font-bold text-white">Canais</h2>
+                    <button onclick="closePlayer()" class="bg-gray-700 hover:bg-gray-600 p-2 rounded-full transition pointer-events-auto">
+                        <i class="ph ph-x text-xl"></i>
+                    </button>
+                </header>
+
+                <!-- Grid de Resultados -->
+                <div id="resultsGrid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+                    <!-- Cards serão inseridos aqui via JS -->
+                </div>
+
+                <!-- Loading / Erro -->
+                <div id="statusMessage" class="hidden flex-col items-center justify-center h-full text-gray-400">
+                    <i class="ph ph-spinner text-4xl mb-2 animate-spin"></i>
+                    <span id="statusText">Carregando...</span>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- SCRIPTS LÓGICOS -->
+    <script>
+        // --- CONFIGURAÇÃO E ESTADO ---
+        let config = {
+            baseUrl: '',
+            username: '',
+            password: ''
+        };
+
+        let currentCategory = null; 
+        
+        // Inicialização do Player Video.js
+        var player = videojs('my-video', {
+            fluid: true,
+            autoplay: false,
+            controls: true,
+            poster: ''
+        });
+
+        // --- FUNÇÕES DE API (Com Suporte a Proxy) ---
+        
+        async function apiCall(method, params) {
+            const url = `${config.baseUrl}?method=${method}&username=${encodeURIComponent(config.username)}&password=${encodeURIComponent(config.password)}`;
+            
+            if (params && Object.keys(params).length > 0) {
+                let queryString = url.split('?')[1];
+                for(let key in params) {
+                    queryString += `&${key}=${encodeURIComponent(params[key])}`;
+                }
+                url = `${config.baseUrl}?${queryString}`;
+            }
+
+            try {
+                const response = await fetch(url);
+                if (!response.ok) throw new Error('Erro de rede');
+                return await response.json();
+            } catch (error) {
+                console.error(error);
+                // Se for erro de CORS, o console mostrará "Access-Control-Allow-Origin"
+                throw error;
+            }
+        }
+
+        // --- LÓGICA DE LOGIN ---
+
+        function attemptLogin() {
+            const urlInput = document.getElementById('serverUrl').value.trim().replace(/\/player\/api\.json$/, ''); 
+            const user = document.getElementById('username').value;
+            const pass = document.getElementById('password').value;
+
+            if (!urlInput || !user || !pass) {
+                showError("Preencha todos os campos.");
+                return;
+            }
+
+            document.getElementById('loginError').classList.add('hidden');
+            const btn = document.querySelector('#loginScreen button');
+            btn.innerHTML = '<i class="ph ph-spinner animate-spin"></i> Verificando...';
+
+            apiCall('GetCategories', {}).then(data => {
+                config.baseUrl = urlInput + '/player/api.json';
+                config.username = user;
+                config.password = pass;
+
+                document.getElementById('loginScreen').classList.add('hidden');
+                document.getElementById('appScreen').classList.remove('hidden');
+                
+                loadChannels();
+                loadVodCategories(); 
+            }).catch(err => {
+                showError("Erro ao conectar: " + err.message);
+                btn.innerHTML = '<i class="ph ph-sign-in"></i> Conectar';
+            });
+        }
+
+        function logout() { location.reload(); }
+
+        function showError(msg) {
+            const el = document.getElementById('loginError');
+            el.innerText = msg;
+            el.classList.remove('hidden');
+        }
+
+        // --- LÓGICA DE CANAIS (TV) ---
+
+        async function loadChannels() {
+            showStatus("Carregando Canais...", true);
+            
+            try {
+                const data = await apiCall('GetChannels', {});
+                
+                document.getElementById('pageTitle').innerText = "Canais de TV";
+                renderGrid(data.channels, 'channel'); 
+                
+                if(!data.channels || data.channels.length === 0) {
+                    showStatus("Nenhum canal encontrado.", false);
+                }
+
+            } catch (e) {
+                showError("Falha ao carregar canais.");
+            } finally {
+                hideStatus();
+            }
+        }
+
+        // --- LÓGICA DE VOD (Filmes/Séries) ---
+
+        async function loadVodCategories() {
+            showStatus("Carregando Categorias...", true);
+            
+            try {
+                const data = await apiCall('GetCategories', {});
+                
+                const container = document.getElementById('vod-categories');
+                container.innerHTML = ''; 
+
+                if (data.categories && data.categories.length > 0) {
+                    data.categories.forEach(cat => {
+                        const btn = document.createElement('button');
+                        btn.className = "w-full flex items-center gap-3 px-4 py-2 bg-gray-700 hover:bg-blue-600 rounded-lg text-left transition duration-200 group";
+                        btn.innerHTML = `
+                            <i class="ph ph-folder-open text-xl"></i>
+                            <span class="font-medium truncate">${cat.name}</span>
+                        `;
+                        btn.onclick = () => loadMoviesFromCategory(cat.id); 
+                        
+                        container.appendChild(btn);
+                    });
+                } else {
+                    const p = document.createElement('p');
+                    p.className = "text-gray-400 text-sm";
+                    p.innerText = "Nenhuma categoria encontrada.";
+                    container.appendChild(p);
+                }
+
+            } catch (e) {
+                showError("Falha ao carregar categorias.");
+            } finally {
+                hideStatus();
+            }
+        }
+
+        async function loadMoviesFromCategory(catId) {
+            currentCategory = catId; 
+            showStatus("Carregando Filmes...", true);
+            
+            try {
+                const data = await apiCall('GetMovies', { category_id: catId });
+                
+                document.getElementById('pageTitle').innerText = `Filmes - ${getCategoryName(catId)}`;
+                renderGrid(data.movies, 'movie');
+
+            } catch (e) {
+                showError("Falha ao carregar filmes.");
+            } finally {
+                hideStatus();
+            }
+        }
+
+        async function loadSeries() { 
+             showStatus("Carregando Séries...", true);
+             
+             try {
+                const data = await apiCall('GetSeries', {}); 
+                
+                document.getElementById('pageTitle').innerText = "Séries";
+                renderGrid(data.series, 'series');
+
+            } catch (e) {
+                showError("Falha ao carregar séries.");
+            } finally {
+                hideStatus();
+            }
+        }
+
+        // --- RENDERIZAÇÃO E PLAYER ---
+
+        function renderGrid(items, type) {
+            const grid = document.getElementById('resultsGrid');
+            grid.innerHTML = '';
+
+            if (!items || items.length === 0) {
+                showStatus("Nenhum item encontrado.", false);
+                return;
+            }
+
+            const limit = Math.min(items.length, 24); 
+
+            for (let i = 0; i < limit; i++) {
+                const item = items[i];
+                
+                let iconClass = 'ph-play-circle';
+                if(type === 'channel') iconClass = 'ph-tv';
+                else if(type === 'movie') iconClass = 'ph-film-strip';
+                else if(type === 'series') iconClass = 'ph-clapperboard';
+
+                const card = document.createElement('div');
+                card.className = "bg-gray-800 rounded-lg overflow-hidden border border-gray-700 card-hover flex flex-col";
+                
+                let imgSrc = item.logo || 'https://via.placeholder.com/300x169?text=Sem+Imagem';
+                if(type === 'movie' && item.poster) imgSrc = item.poster;
+
+                card.innerHTML = `
+                    <div class="relative h-48 bg-gray-700 overflow-hidden">
+                        <img src="${imgSrc}" alt="${item.name}" class="w-full h-full object-cover opacity-90 hover:opacity-100 transition">
+                        <div class="absolute inset-0 flex items-center justify-center bg-black/20 group-hover:bg-transparent transition">
+                            <i class="ph ${iconClass} text-4xl text-white drop-shadow-md"></i>
+                        </div>
+                    </div>
+                    <div class="p-3 flex-1 flex flex-col">
+                        <h3 class="font-bold text-sm truncate mb-1" title="${item.name}">${item.name}</h3>
+                        ${type === 'channel' ? `<span class="text-xs text-gray-400 uppercase tracking-wider">${item.group_title || 'Geral'}</span>` : ''}
+                    </div>
+                `;
+
+                card.onclick = () => {
+                    playStream(item.stream_url);
+                };
+
+                grid.appendChild(card);
+            }
+        }
+
+        function playStream(url) {
+            const container = document.getElementById('playerContainer');
+            
+            if (container.style.opacity === '1') {
+                player.src({ type: url.split('?')[0], src: url });
+                player.play();
+            } else {
+                container.classList.remove('pointer-events-none');
+                container.classList.add('opacity-100', 'z-50'); 
+                
+                setTimeout(() => {
+                    player.src({ type: url.split('?')[0], src: url });
+                    player.play();
+                }, 100);
+            }
+
+            document.getElementById('playerContainer').scrollIntoView({ behavior: 'smooth' });
+        }
+
+        function closePlayer() {
+            const container = document.getElementById('playerContainer');
+            container.classList.remove('opacity-100', 'z-50');
+            container.classList.add('pointer-events-none', 'opacity-0'); 
+            player.pause(); 
+        }
+
+        function showStatus(msg, isLoading = false) {
+            const statusDiv = document.getElementById('statusMessage');
+            const statusText = document.getElementById('statusText');
+            
+            statusDiv.classList.remove('hidden', 'flex-col');
+            statusDiv.classList.add('flex');
+            
+            if (isLoading) {
+                statusText.innerText = msg;
+                statusText.className = "text-blue-400 font-bold";
+            } else {
+                statusText.innerText = msg;
+                statusText.className = "text-gray-300";
+            }
+        }
+
+        function hideStatus() {
+            document.getElementById('statusMessage').classList.add('hidden');
+        }
+
+        // Helper simples para nome da categoria
+        function getCategoryName(id) {
+             return id; 
+        }
+
+    </script>
+</body>
+</html>
