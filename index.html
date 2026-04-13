@@ -154,27 +154,34 @@
             poster: ''
         });
 
-        // --- FUNÇÕES DE API (Com Suporte a Proxy) ---
+        // --- FUNÇÕES DE API (Com Suporte a CORS Proxy) ---
+        const CORS_PROXY = 'https://corsproxy.io/?url=';
         
         async function apiCall(method, params) {
-            let url = `${config.baseUrl}?method=${method}&username=${encodeURIComponent(config.username)}&password=${encodeURIComponent(config.password)}`;
+            let apiUrl = `${config.baseUrl}?method=${method}&username=${encodeURIComponent(config.username)}&password=${encodeURIComponent(config.password)}`;
             
             if (params && Object.keys(params).length > 0) {
-                let queryString = url.split('?')[1];
                 for(let key in params) {
-                    queryString += `&${key}=${encodeURIComponent(params[key])}`;
+                    apiUrl += `&${key}=${encodeURIComponent(params[key])}`;
                 }
-                url = `${config.baseUrl}?${queryString}`;
             }
 
+            // Tenta direto primeiro; se falhar por CORS, tenta via proxy
             try {
-                const response = await fetch(url);
-                if (!response.ok) throw new Error('Erro de rede');
+                const response = await fetch(apiUrl, { signal: AbortSignal.timeout(8000) });
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
                 return await response.json();
-            } catch (error) {
-                console.error(error);
-                // Se for erro de CORS, o console mostrará "Access-Control-Allow-Origin"
-                throw error;
+            } catch (directError) {
+                console.warn('Requisição direta falhou, tentando via proxy CORS...', directError.message);
+                try {
+                    const proxyUrl = CORS_PROXY + encodeURIComponent(apiUrl);
+                    const response = await fetch(proxyUrl, { signal: AbortSignal.timeout(15000) });
+                    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                    return await response.json();
+                } catch (proxyError) {
+                    console.error('Proxy também falhou:', proxyError);
+                    throw new Error('Não foi possível conectar ao servidor. Verifique a URL e suas credenciais.');
+                }
             }
         }
 
@@ -205,7 +212,7 @@
                 loadChannels();
                 loadVodCategories(); 
             }).catch(err => {
-                showError("Erro ao conectar: " + err.message);
+                showError(err.message || 'Erro ao conectar. Verifique a URL e as credenciais.');
                 btn.innerHTML = '<i class="ph ph-sign-in"></i> Conectar';
             });
         }
